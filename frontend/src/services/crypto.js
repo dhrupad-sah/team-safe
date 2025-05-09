@@ -5,7 +5,7 @@
  * Generate RSA key pair for encryption/decryption
  * @returns {Promise<{publicKey: string, privateKey: string}>} - Key pair as JWK strings
  */
-async function generateKeyPair() {
+export async function generateKeyPair() {
   try {
     // Generate RSA key pair
     const keyPair = await window.crypto.subtle.generateKey(
@@ -97,7 +97,7 @@ async function importPrivateKey(jwkString) {
  * @param {string} publicKeyJwk - Public key as a JWK string
  * @returns {Promise<string>} - Encrypted data as base64 string
  */
-async function encryptWithPublicKey(data, publicKeyJwk) {
+export async function encryptWithPublicKey(data, publicKeyJwk) {
   try {
     console.log('Public key before import:', publicKeyJwk);
     const publicKey = await importPublicKey(publicKeyJwk);
@@ -129,7 +129,7 @@ async function encryptWithPublicKey(data, publicKeyJwk) {
  * @param {string} privateKeyJwk - Private key as a JWK string
  * @returns {Promise<string>} - Decrypted data
  */
-async function decryptWithPrivateKey(encryptedData, privateKeyJwk) {
+export async function decryptWithPrivateKey(encryptedData, privateKeyJwk) {
   try {
     const privateKey = await importPrivateKey(privateKeyJwk);
     
@@ -188,7 +188,7 @@ function base64ToBuffer(base64) {
  * @param {string} password - User's password
  * @returns {Promise<void>}
  */
-async function storePrivateKey(privateKey, password) {
+export async function storePrivateKey(privateKey, password) {
   try {
     // Generate a random salt (16 bytes)
     const salt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -200,50 +200,46 @@ async function storePrivateKey(privateKey, password) {
       passwordEncoder.encode(password),
       { name: "PBKDF2" },
       false,
-      ["deriveKey"]
+      ["deriveBits", "deriveKey"]
     );
     
-    // Derive an AES-GCM key from the password
-    const aesKey = await window.crypto.subtle.deriveKey(
+    // Derive a key from the password
+    const derivedKey = await window.crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
-        salt: salt,
+        salt,
         iterations: 100000,
         hash: "SHA-256"
       },
       passwordKey,
-      {
-        name: "AES-GCM",
-        length: 256
-      },
+      { name: "AES-GCM", length: 256 },
       false,
-      ["encrypt", "decrypt"]
+      ["encrypt"]
     );
     
-    // Generate a random IV (12 bytes)
+    // Generate an initialization vector (IV)
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     
     // Encrypt the private key
     const encoder = new TextEncoder();
     const privateKeyBuffer = encoder.encode(privateKey);
-    const encryptedData = await window.crypto.subtle.encrypt(
+    const encryptedKey = await window.crypto.subtle.encrypt(
       {
         name: "AES-GCM",
-        iv: iv
+        iv
       },
-      aesKey,
+      derivedKey,
       privateKeyBuffer
     );
     
-    // Create a storage object with all the necessary components
-    const storageObject = {
+    // Store the encrypted key, salt, and IV in localStorage
+    const encryptedData = {
       salt: bufferToBase64(salt),
       iv: bufferToBase64(iv),
-      encryptedPrivateKey: bufferToBase64(encryptedData)
+      encryptedKey: bufferToBase64(encryptedKey)
     };
     
-    // Store as JSON in localStorage
-    localStorage.setItem('securePrivateKey', JSON.stringify(storageObject));
+    localStorage.setItem('encryptedPrivateKey', JSON.stringify(encryptedData));
   } catch (error) {
     console.error('Error storing private key:', error);
     throw new Error('Failed to securely store private key');
@@ -251,23 +247,25 @@ async function storePrivateKey(privateKey, password) {
 }
 
 /**
- * Retrieve private key from localStorage and decrypt with user's password
+ * Retrieve private key from localStorage (decrypted with user's password)
  * @param {string} password - User's password
- * @returns {Promise<string|null>} - Private key as JWK string or null if retrieval fails
+ * @returns {Promise<string|null>} - Private key as JWK string or null if not found/decryption fails
  */
-async function retrievePrivateKey(password) {
+export async function retrievePrivateKey(password) {
   try {
-    // Get encrypted data from localStorage
-    const storedData = localStorage.getItem('securePrivateKey');
-    if (!storedData) {
+    // Get the encrypted data from localStorage
+    const encryptedData = localStorage.getItem('encryptedPrivateKey');
+    if (!encryptedData) {
+      console.error('No encrypted private key found in localStorage');
       return null;
     }
     
-    // Parse the storage object
-    const storageObject = JSON.parse(storedData);
-    const salt = base64ToBuffer(storageObject.salt);
-    const iv = base64ToBuffer(storageObject.iv);
-    const encryptedData = base64ToBuffer(storageObject.encryptedPrivateKey);
+    const { salt, iv, encryptedKey } = JSON.parse(encryptedData);
+    
+    // Convert base64 strings back to ArrayBuffers
+    const saltBuffer = base64ToBuffer(salt);
+    const ivBuffer = base64ToBuffer(iv);
+    const encryptedKeyBuffer = base64ToBuffer(encryptedKey);
     
     // Convert password to key using PBKDF2
     const passwordEncoder = new TextEncoder();
@@ -276,55 +274,38 @@ async function retrievePrivateKey(password) {
       passwordEncoder.encode(password),
       { name: "PBKDF2" },
       false,
-      ["deriveKey"]
+      ["deriveBits", "deriveKey"]
     );
     
-    // Derive the same AES-GCM key from the password and stored salt
-    const aesKey = await window.crypto.subtle.deriveKey(
+    // Derive the same key from the password
+    const derivedKey = await window.crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
-        salt: salt,
+        salt: saltBuffer,
         iterations: 100000,
         hash: "SHA-256"
       },
       passwordKey,
-      {
-        name: "AES-GCM",
-        length: 256
-      },
+      { name: "AES-GCM", length: 256 },
       false,
-      ["encrypt", "decrypt"]
+      ["decrypt"]
     );
     
     // Decrypt the private key
-    try {
-      const decryptedData = await window.crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv: iv
-        },
-        aesKey,
-        encryptedData
-      );
-      
-      // Convert back to string
-      const decoder = new TextDecoder();
-      return decoder.decode(decryptedData);
-    } catch (decryptError) {
-      // Decryption failed - likely wrong password
-      console.error('Decryption failed - incorrect password:', decryptError);
-      return null;
-    }
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: ivBuffer
+      },
+      derivedKey,
+      encryptedKeyBuffer
+    );
+    
+    // Convert the decrypted buffer back to a string
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedBuffer);
   } catch (error) {
     console.error('Error retrieving private key:', error);
     return null;
   }
-}
-
-export {
-  generateKeyPair,
-  encryptWithPublicKey,
-  decryptWithPrivateKey,
-  storePrivateKey,
-  retrievePrivateKey
-}; 
+} 

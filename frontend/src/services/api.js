@@ -42,7 +42,7 @@ async function apiRequest(endpoint, options = {}) {
 }
 
 // Authentication Service
-const AuthService = {
+export const AuthService = {
   /**
    * Register a new user
    * @param {Object} userData - User registration data
@@ -111,7 +111,7 @@ const AuthService = {
 };
 
 // User Service
-const UserService = {
+export const UserService = {
   /**
    * Get user profile
    * @returns {Promise<any>} - API response
@@ -142,7 +142,7 @@ const UserService = {
 };
 
 // Secret Service
-const SecretService = {
+export const SecretService = {
   /**
    * Share a secret with another user
    * @param {Object} secretData - Secret data
@@ -183,10 +183,4 @@ const SecretService = {
       method: 'PUT'
     });
   }
-};
-
-export {
-  AuthService,
-  UserService,
-  SecretService
 }; 

@@ -30,21 +30,28 @@ process.on('uncaughtException', (error) => {
 let mainWindow;
 let secondWindow;
 
-// Get the HTML path using the app's path for more reliable resolution
-const getHtmlPath = () => {
-  const appPath = app.getAppPath();
-  const htmlPath = path.join(appPath, 'src', 'renderer', 'index.html');
-  console.log('App path:', appPath);
-  console.log('HTML path:', htmlPath);
+// Get the HTML path depending on the environment
+const getLoadUrl = () => {
+  const isDev = process.env.NODE_ENV !== 'production';
   
-  // Check if the HTML file exists
-  if (fs.existsSync(htmlPath)) {
-    console.log('HTML file exists');
+  if (isDev) {
+    // In development, use webpack dev server
+    return 'http://localhost:8080';
   } else {
-    console.error('HTML file does not exist at', htmlPath);
+    // In production, use built dist/index.html
+    const appPath = app.getAppPath();
+    const htmlPath = path.join(appPath, 'dist', 'index.html');
+    console.log('HTML path:', htmlPath);
+    
+    // Check if the HTML file exists
+    if (fs.existsSync(htmlPath)) {
+      console.log('HTML file exists');
+      return `file://${htmlPath}`;
+    } else {
+      console.error('HTML file does not exist at', htmlPath);
+      return `file://${path.join(appPath, 'src', 'renderer', 'index.html')}`;
+    }
   }
-  
-  return htmlPath;
 };
 
 // Function to create a browser window for testing
@@ -72,7 +79,7 @@ function createTestWindow(x, y, title, partition) {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self' http://localhost:3001; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3001; style-src 'self' 'unsafe-inline'"
+          "default-src 'self' http://localhost:3001 http://localhost:8080; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:3001 ws://localhost:8080; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
         ]
       }
     });
@@ -92,11 +99,10 @@ function createTestWindow(x, y, title, partition) {
     console.log(`[${title} Console]: ${message}`);
   });
 
-  // Use file URL format instead of loadFile for consistency
-  const htmlPath = getHtmlPath();
-  const fileUrl = `file://${htmlPath}`;
-  console.log(`Loading ${title} from: ${fileUrl}`);
-  win.loadURL(fileUrl);
+  // Load the app
+  const loadUrl = getLoadUrl();
+  console.log(`Loading ${title} from: ${loadUrl}`);
+  win.loadURL(loadUrl);
   
   win.webContents.openDevTools({ mode: 'detach' });
 
@@ -109,7 +115,7 @@ async function createMenuBar() {
   console.log('Creating menubar...');
   
   const mb = menubar({
-    index: `file://${getHtmlPath()}`,
+    index: getLoadUrl(),
     // Use Electron's default tray icon for now
     // icon: path.join(__dirname, '../../assets/iconTemplate.png'),
     browserWindow: {
@@ -141,7 +147,7 @@ async function createMenuBar() {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self' http://localhost:3001; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3001; style-src 'self' 'unsafe-inline'"
+            "default-src 'self' http://localhost:3001 http://localhost:8080; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http://localhost:3001 ws://localhost:8080; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
           ]
         }
       });
@@ -201,4 +207,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
-}); 
+});
+
+// In this file you can include the rest of your app's specific main process code.
+// You can also put them in separate files and require them here. 
